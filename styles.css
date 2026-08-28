@@ -20,6 +20,8 @@
     --border: #334155;
     --success: #22c55e;
     --warning: #f59e0b;
+    --vacation: #7c3aed;
+    --future: #475569;
 }
 
 body {
@@ -77,31 +79,6 @@ body {
     letter-spacing: -0.5px;
 }
 
-.header-actions {
-    display: flex;
-    gap: 8px;
-}
-
-.icon-btn {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    border: 1px solid var(--border);
-    background: var(--bg-card);
-    color: var(--text-secondary);
-    font-size: 18px;
-    cursor: pointer;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    transition: all 0.2s;
-}
-
-.icon-btn:hover {
-    background: var(--bg-card-hover);
-    color: var(--text-primary);
-}
-
 /* Group Tabs */
 .group-tabs {
     display: flex;
@@ -132,17 +109,6 @@ body {
     color: white;
     border-color: var(--accent);
     box-shadow: 0 4px 12px rgba(59, 130, 246, 0.3);
-}
-
-.add-tab {
-    width: 36px;
-    height: 36px;
-    padding: 0;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    border-radius: 50%;
-    font-size: 20px;
 }
 
 /* Week Selector */
@@ -262,6 +228,49 @@ body {
     overflow-y: auto;
 }
 
+/* Vacation State */
+.vacation-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 60px 24px;
+    text-align: center;
+    background: linear-gradient(135deg, #1e293b 0%, #312e81 50%, #1e293b 100%);
+    border-radius: 24px;
+    border: 1px solid #4c1d95;
+    margin-top: 8px;
+}
+
+.vacation-icon {
+    font-size: 56px;
+    margin-bottom: 16px;
+}
+
+.vacation-title {
+    font-size: 20px;
+    font-weight: 700;
+    margin-bottom: 8px;
+    color: #c4b5fd;
+}
+
+.vacation-text {
+    font-size: 14px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.vacation-countdown {
+    margin-top: 16px;
+    padding: 10px 20px;
+    background: rgba(124, 58, 237, 0.15);
+    border-radius: 12px;
+    font-size: 14px;
+    color: #a78bfa;
+    font-weight: 500;
+}
+
+/* Empty State */
 .empty-state {
     display: flex;
     flex-direction: column;
@@ -325,6 +334,41 @@ body {
 .lesson-card:hover {
     background: var(--bg-card-hover);
     transform: translateY(-1px);
+}
+
+/* Future lesson (not started yet) */
+.lesson-card.future {
+    opacity: 0.6;
+    border-color: var(--future);
+}
+
+.lesson-card.future::before {
+    background: var(--future) !important;
+}
+
+.lesson-card.future .lesson-time {
+    background: rgba(71, 85, 105, 0.2);
+    color: var(--text-muted);
+}
+
+.lesson-card.future .lesson-title {
+    color: var(--text-muted);
+}
+
+.lesson-card.future .lesson-meta {
+    color: var(--text-muted);
+}
+
+.future-badge {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+    background: rgba(71, 85, 105, 0.3);
+    color: var(--text-muted);
 }
 
 .lesson-time {
@@ -424,7 +468,7 @@ body {
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    padding: 8px 16px;
+    padding: 8px 24px;
     border: none;
     background: none;
     color: var(--text-muted);
@@ -457,7 +501,7 @@ body {
     to { opacity: 1; transform: translateY(0); }
 }
 
-.lesson-card {
+.lesson-card.animate {
     animation: fadeIn 0.3s ease forwards;
 }
 
