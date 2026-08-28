@@ -18,8 +18,7 @@ let scheduleData = null;
 let currentWeekNumber = 1;
 let currentWeekParity = 'odd';
 let semesterStart = null;
-let lastRenderedDay = null;
-let lastRenderedWeek = null;
+let lastRenderedKey = null;
 
 const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const dayShortNames = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
@@ -126,18 +125,21 @@ function selectDay(index) {
     renderSchedule();
 }
 
-// Parse week ranges into sorted array of week numbers
-function getLessonWeeks(lesson) {
-    const weeks = [];
+// Parse weeks string into { startWeek, endWeek, allWeeks[] }
+function parseWeeks(lesson) {
+    const allWeeks = [];
+    let startWeek = 16;
+    let endWeek = 1;
+
     if (!lesson.weeks) {
         for (let w = 1; w <= 16; w++) {
             if (lesson.week === 'all' ||
                 (lesson.week === 'odd' && w % 2 === 1) ||
                 (lesson.week === 'even' && w % 2 === 0)) {
-                weeks.push(w);
+                allWeeks.push(w);
             }
         }
-        return weeks;
+        return { startWeek: allWeeks[0] || 1, endWeek: allWeeks[allWeeks.length - 1] || 16, allWeeks };
     }
 
     const ranges = lesson.weeks.split(',').map(r => r.trim());
@@ -148,7 +150,7 @@ function getLessonWeeks(lesson) {
                 if (lesson.week === 'all' ||
                     (lesson.week === 'odd' && w % 2 === 1) ||
                     (lesson.week === 'even' && w % 2 === 0)) {
-                    weeks.push(w);
+                    allWeeks.push(w);
                 }
             }
         } else {
@@ -156,54 +158,75 @@ function getLessonWeeks(lesson) {
             if (lesson.week === 'all' ||
                 (lesson.week === 'odd' && w % 2 === 1) ||
                 (lesson.week === 'even' && w % 2 === 0)) {
-                weeks.push(w);
+                allWeeks.push(w);
             }
         }
     }
-    return [...new Set(weeks)].sort((a, b) => a - b);
+
+    allWeeks.sort((a, b) => a - b);
+    return {
+        startWeek: allWeeks[0] || 1,
+        endWeek: allWeeks[allWeeks.length - 1] || 16,
+        allWeeks
+    };
 }
 
-// Main filter: show only lessons matching current week parity
-function getLessonsForDay(dayLessons, currentWeekNum, currentParity) {
-    const result = [];
+// Get lesson status for current week
+function getLessonStatus(lesson, currentWeekNum) {
+    const { startWeek, endWeek, allWeeks } = parseWeeks(lesson);
+
+    if (allWeeks.includes(currentWeekNum)) {
+        return { status: 'active', startWeek, endWeek };
+    }
+
+    if (currentWeekNum < startWeek) {
+        return { status: 'future', startWeek, endWeek };
+    }
+
+    if (currentWeekNum > endWeek) {
+        return { status: 'past', startWeek, endWeek };
+    }
+
+    // Between start and end but not in list (gap week)
+    const futureWeeks = allWeeks.filter(w => w > currentWeekNum);
+    if (futureWeeks.length > 0) {
+        return { status: 'future', startWeek: futureWeeks[0], endWeek };
+    }
+
+    return { status: 'past', startWeek, endWeek };
+}
+
+// Group lessons by time slot and pick the best one to display
+function getDisplayLessons(dayLessons, currentWeekNum) {
+    const byTime = {};
 
     for (const lesson of dayLessons) {
-        const lessonParity = lesson.week;
+        const statusInfo = getLessonStatus(lesson, currentWeekNum);
+        if (statusInfo.status === 'past') continue;
 
-        // Skip lessons for wrong parity entirely
-        if (lessonParity !== 'all' && lessonParity !== currentParity) {
-            continue;
-        }
-
-        const lessonWeeks = getLessonWeeks(lesson);
-        if (lessonWeeks.length === 0) continue;
-
-        // Active: current week is in the list
-        if (lessonWeeks.includes(currentWeekNum)) {
-            result.push({ lesson, status: 'active', startWeek: null });
-            continue;
-        }
-
-        // Future: current week is before any of the lesson weeks
-        const minWeek = lessonWeeks[0];
-        if (currentWeekNum < minWeek) {
-            result.push({ lesson, status: 'future', startWeek: minWeek });
-            continue;
-        }
-
-        // Past: current week is after all lesson weeks
-        const maxWeek = lessonWeeks[lessonWeeks.length - 1];
-        if (currentWeekNum > maxWeek) {
-            continue;
-        }
-
-        // Current week is between min and max but not in list (gap week)
-        // Find next future week
-        const futureWeeks = lessonWeeks.filter(w => w > currentWeekNum);
-        if (futureWeeks.length > 0) {
-            result.push({ lesson, status: 'future', startWeek: futureWeeks[0] });
-        }
+        const time = lesson.time;
+        if (!byTime[time]) byTime[time] = [];
+        byTime[time].push({ lesson, status: statusInfo.status, startWeek: statusInfo.startWeek, endWeek: statusInfo.endWeek });
     }
+
+    const result = [];
+    for (const time in byTime) {
+        const items = byTime[time];
+        // Sort: active first, then by startWeek ascending
+        items.sort((a, b) => {
+            if (a.status === 'active' && b.status !== 'active') return -1;
+            if (a.status !== 'active' && b.status === 'active') return 1;
+            return a.startWeek - b.startWeek;
+        });
+
+        // Take the first one (active if exists, otherwise earliest future)
+        const best = items[0];
+        result.push(best);
+    }
+
+    // Sort by time
+    const timeOrder = Object.keys(byTime);
+    result.sort((a, b) => timeOrder.indexOf(a.lesson.time) - timeOrder.indexOf(b.lesson.time));
 
     return result;
 }
@@ -228,8 +251,6 @@ function renderSchedule() {
     }
 
     const weekInfo = getWeekInfo(currentWeekOffset);
-
-    // Check if selected day is before semester start
     const start = weekInfo.start;
     const selectedDate = new Date(start);
     selectedDate.setDate(start.getDate() + currentDayIndex);
@@ -251,10 +272,9 @@ function renderSchedule() {
         return;
     }
 
-    // Filter by current week parity
-    const lessonItems = getLessonsForDay(lessons, currentWeekNumber, currentWeekParity);
+    const displayItems = getDisplayLessons(lessons, currentWeekNumber);
 
-    if (lessonItems.length === 0) {
+    if (displayItems.length === 0) {
         container.innerHTML = emptyStateHTML(
             'Нет пар в этот день',
             'На этой неделе занятий нет, но они будут позже в семестре.'
@@ -262,25 +282,29 @@ function renderSchedule() {
         return;
     }
 
-    // Determine if we should animate (only on first render of this day/week combo)
     const renderKey = currentDayIndex + '-' + currentWeekOffset;
-    const shouldAnimate = renderKey !== (lastRenderedDay + '-' + lastRenderedWeek);
-    lastRenderedDay = currentDayIndex;
-    lastRenderedWeek = currentWeekOffset;
+    const shouldAnimate = renderKey !== lastRenderedKey;
+    lastRenderedKey = renderKey;
 
-    container.innerHTML = lessonItems.map((item, index) => {
+    container.innerHTML = displayItems.map((item, index) => {
         const lesson = item.lesson;
         const isFuture = item.status === 'future';
         const typeClass = getLessonTypeClass(lesson.subject);
-        const futureBadge = isFuture ?
-            '<span class="future-badge">С ' + item.startWeek + ' недели</span>' : '';
-        const isFullDay = lesson.full_day;
         const futureClass = isFuture ? 'future' : '';
         const animateClass = shouldAnimate ? 'animate' : '';
+        const isFullDay = lesson.full_day;
+
+        // Badge logic
+        let badge = '';
+        if (isFuture) {
+            badge = '<span class="future-badge">С ' + item.startWeek + ' недели</span>';
+        } else if (item.endWeek < 16) {
+            badge = '<span class="end-badge">до ' + item.endWeek + ' недели</span>';
+        }
 
         if (isFullDay) {
             return '<div class="lesson-card ' + typeClass + ' full-day ' + futureClass + ' ' + animateClass + '" style="animation-delay: ' + (index * 0.05) + 's">' +
-                futureBadge +
+                badge +
                 '<div class="lesson-time">' + lesson.time + '</div>' +
                 '<div class="lesson-title">' + lesson.subject + '</div>' +
                 '<div class="lesson-meta">' +
@@ -289,7 +313,7 @@ function renderSchedule() {
         }
 
         return '<div class="lesson-card ' + typeClass + ' ' + futureClass + ' ' + animateClass + '" style="animation-delay: ' + (index * 0.05) + 's">' +
-            futureBadge +
+            badge +
             '<div class="lesson-time">' + lesson.time + '</div>' +
             '<div class="lesson-title">' + lesson.subject + '</div>' +
             '<div class="lesson-meta">' +
@@ -355,8 +379,7 @@ function setupEventListeners() {
 function showPagePlaceholder(page) {
     const container = document.getElementById('scheduleContent');
     const titles = {
-        sport: 'Спортивные занятия',
-        other: 'Другие разделы'
+        sport: 'Спортивные занятия'
     };
     container.innerHTML = emptyStateHTML(titles[page] || 'Раздел в разработке', 'Этот раздел скоро появится!');
 }
