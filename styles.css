@@ -526,3 +526,22 @@ body {
     .day-num { font-size: 14px; }
     .lesson-title { font-size: 14px; }
 }
+
+/* End week badge */
+.end-badge {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 6px;
+    font-weight: 600;
+    background: rgba(245, 158, 11, 0.15);
+    color: #fbbf24;
+}
+
+/* Bottom nav - only 2 items, spread them */
+.bottom-nav {
+    justify-content: center;
+    gap: 40px;
+}
