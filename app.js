@@ -16,6 +16,7 @@ let currentWeekOffset = 0;
 let currentDayIndex = 0;
 let scheduleData = null;
 let semesterStart = null;
+let semesterMonday = null;
 let lastRenderedKey = null;
 let listenersInitialized = false;
 
@@ -25,12 +26,22 @@ const monthNames = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 
 const monthNamesFull = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
                         'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
+// Находит понедельник для любой даты (0=пн, ..., 6=вс)
+function getMondayOfWeek(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); // 0=вс, 1=пн, ..., 6=сб
+    const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.setDate(diff));
+}
+
 async function loadSchedule() {
     try {
         const response = await fetch('schedule_data.json');
         scheduleData = await response.json();
         semesterStart = new Date(scheduleData.meta.start_date);
         semesterStart.setHours(0, 0, 0, 0);
+        semesterMonday = getMondayOfWeek(semesterStart);
         initApp();
         setupEventListeners();
     } catch (e) {
@@ -42,7 +53,7 @@ async function loadSchedule() {
 function getCurrentWeekNumber() {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
+    const diffDays = Math.floor((now - semesterMonday) / (1000 * 60 * 60 * 24));
     return Math.floor(diffDays / 7) + 1;
 }
 
@@ -50,8 +61,8 @@ function getWeekInfo(offset) {
     const currentWeek = getCurrentWeekNumber();
     const targetWeek = currentWeek + offset;
 
-    const weekStart = new Date(semesterStart);
-    weekStart.setDate(semesterStart.getDate() + (targetWeek - 1) * 7);
+    const weekStart = new Date(semesterMonday);
+    weekStart.setDate(semesterMonday.getDate() + (targetWeek - 1) * 7);
 
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 6);
@@ -160,14 +171,11 @@ function selectDay(index) {
 }
 
 function goToToday() {
+    currentWeekOffset = 0;
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-
-    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
-    const dayOfWeek = ((diffDays % 7) + 7) % 7;
-
-    currentWeekOffset = 0;
-    currentDayIndex = Math.max(0, Math.min(6, dayOfWeek));
+    const day = now.getDay(); // 0=вс, 1=пн, ..., 6=сб
+    currentDayIndex = (day === 0) ? 6 : day - 1; // 0=пн, ..., 5=сб, 6=вс
     setActiveNavTab('schedule');
     initApp();
 }
