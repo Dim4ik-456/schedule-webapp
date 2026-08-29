@@ -1,305 +1,270 @@
-// Telegram WebApp initialization
+// Telegram WebApp
 const tg = window.Telegram.WebApp;
-
 tg.ready();
 tg.expand();
-if (tg.disableVerticalSwipes) {
-    tg.disableVerticalSwipes();
-}
-
+if (tg.disableVerticalSwipes) tg.disableVerticalSwipes();
 tg.setHeaderColor('#0f1419');
 tg.setBackgroundColor('#0f1419');
 
-// App State
+// State
 let currentGroup = 'БИ 2-3';
-let currentWeekOffset = 0;  // 0 = текущая неделя, +1 = след, -1 = пред
-let currentDayIndex = 0;    // 0 = ПН
+let currentWeekNum = 1;   // 1..16, текущая отображаемая неделя
+let currentDayIndex = 0;  // 0=ПН..6=ВС
 let scheduleData = null;
 let semesterStart = null;
-let lastRenderedKey = null;
+let lastRenderKey = '';
 
-const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-const dayShortNames = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
-const monthNames = ['янв', 'фев', 'мар', 'апр', 'мая', 'июн', 'июл', 'авг', 'сен', 'окт', 'ноя', 'дек'];
-const monthNamesFull = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-                        'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const dayNames = ['monday','tuesday','wednesday','thursday','friday','saturday','sunday'];
+const dayShortNames = ['ПН','ВТ','СР','ЧТ','ПТ','СБ','ВС'];
+const monthNames = ['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+const monthNamesFull = ['Январь','Февраль','Март','Апрель','Май','Июнь',
+                        'Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 
 async function loadSchedule() {
     try {
-        const response = await fetch('schedule_data.json');
-        scheduleData = await response.json();
-        semesterStart = new Date(scheduleData.meta.start_date);
-        semesterStart.setHours(0, 0, 0, 0);
+        const res = await fetch('schedule_data.json?v=3');
+        scheduleData = await res.json();
+        semesterStart = new Date(scheduleData.meta.start_date + 'T00:00:00');
+        currentWeekNum = getRealWeekNum();
+        currentDayIndex = getRealDayIndex();
         initApp();
     } catch (e) {
-        console.error('Failed to load schedule:', e);
-        showError('Не удалось загрузить расписание');
+        console.error(e);
+        showError('Ошибка загрузки расписания');
     }
 }
 
-// Получить номер текущей недели (1-16) относительно semesterStart
-function getBaseWeekNumber() {
+// Какая сейчас реальная учебная неделя (1..16)
+function getRealWeekNum() {
     const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    now.setHours(0,0,0,0);
     if (now < semesterStart) return 1;
-    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
-    return Math.floor(diffDays / 7) + 1;
+    const days = Math.floor((now - semesterStart) / 86400000);
+    return Math.min(16, Math.floor(days / 7) + 1);
 }
 
-// Получить текущий день недели (0-6) относительно semesterStart
-function getBaseDayIndex() {
+// Какой сейчас реальный день недели (0..6)
+function getRealDayIndex() {
     const now = new Date();
-    now.setHours(0, 0, 0, 0);
+    now.setHours(0,0,0,0);
     if (now < semesterStart) return 0;
-    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
-    return diffDays % 7;
+    const days = Math.floor((now - semesterStart) / 86400000);
+    return days % 7;
 }
 
-// Инфо о неделе по смещению от текущей
-function getWeekInfo(offset) {
-    const baseWeek = getBaseWeekNumber();
-    const targetWeek = baseWeek + offset;
-    const clampedWeek = Math.max(1, Math.min(16, targetWeek));
-    const isOdd = scheduleData.meta.odd_weeks.includes(clampedWeek);
+// Дата начала недели N
+function getWeekStart(weekNum) {
+    const d = new Date(semesterStart);
+    d.setDate(semesterStart.getDate() + (weekNum - 1) * 7);
+    d.setHours(0,0,0,0);
+    return d;
+}
 
-    // Начало недели = semesterStart + (clampedWeek - 1) * 7 дней
-    const weekStart = new Date(semesterStart);
-    weekStart.setDate(semesterStart.getDate() + (clampedWeek - 1) * 7);
+// Дата конца недели N
+function getWeekEnd(weekNum) {
+    const d = getWeekStart(weekNum);
+    d.setDate(d.getDate() + 6);
+    return d;
+}
 
-    const weekEnd = new Date(weekStart);
-    weekEnd.setDate(weekStart.getDate() + 6);
-
+function getWeekInfo(weekNum) {
+    const wn = Math.max(1, Math.min(16, weekNum));
+    const isOdd = scheduleData.meta.odd_weeks.includes(wn);
+    const start = getWeekStart(wn);
+    const end = getWeekEnd(wn);
     return {
-        weekNumber: clampedWeek,
+        weekNumber: wn,
         isOdd: isOdd,
         parity: isOdd ? 'odd' : 'even',
         parityText: isOdd ? 'Нечётная' : 'Чётная',
-        start: weekStart,
-        end: weekEnd,
-        monthText: getMonthRangeText(weekStart, weekEnd)
+        start: start,
+        end: end,
+        monthText: getMonthRangeText(start, end)
     };
 }
 
-function getMonthRangeText(start, end) {
-    const sm = monthNamesFull[start.getMonth()];
-    const em = monthNamesFull[end.getMonth()];
-    return sm === em ? sm : sm + ' — ' + em;
+function getMonthRangeText(a, b) {
+    const ma = monthNamesFull[a.getMonth()];
+    const mb = monthNamesFull[b.getMonth()];
+    return ma === mb ? ma : ma + ' — ' + mb;
 }
 
-function formatDate(date) {
-    return date.getDate() + ' ' + monthNames[date.getMonth()];
+function fmtDate(d) {
+    return d.getDate() + ' ' + monthNames[d.getMonth()];
 }
 
-function isDateBeforeSemester(date) {
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d < semesterStart;
+function isBeforeSemester(d) {
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    return x < semesterStart;
 }
 
-function isToday(date) {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const d = new Date(date);
-    d.setHours(0, 0, 0, 0);
-    return d.getTime() === now.getTime();
+function isToday(d) {
+    const n = new Date();
+    n.setHours(0,0,0,0);
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    return x.getTime() === n.getTime();
 }
 
-function isDateInCurrentWeek(weekStart, weekEnd) {
-    const now = new Date();
-    now.setHours(0, 0, 0, 0);
-    const ws = new Date(weekStart);
-    ws.setHours(0, 0, 0, 0);
-    const we = new Date(weekEnd);
-    we.setHours(0, 0, 0, 0);
-    return now >= ws && now <= we;
+function isThisWeek(start, end) {
+    const n = new Date();
+    n.setHours(0,0,0,0);
+    const s = new Date(start); s.setHours(0,0,0,0);
+    const e = new Date(end); e.setHours(0,0,0,0);
+    return n >= s && n <= e;
 }
 
 function initApp() {
-    const weekInfo = getWeekInfo(currentWeekOffset);
-    updateWeekDisplay(weekInfo);
-    updateDaysStrip(weekInfo);
+    const info = getWeekInfo(currentWeekNum);
+    updateWeekDisplay(info);
+    updateDaysStrip(info);
     renderSchedule();
-    setupEventListeners();
+    setupListenersOnce();
 }
 
-function updateWeekDisplay(weekInfo) {
-    document.getElementById('weekMonth').textContent = weekInfo.monthText;
-    document.getElementById('weekType').textContent = weekInfo.parityText;
+function updateWeekDisplay(info) {
+    document.getElementById('weekMonth').textContent = info.monthText;
+    document.getElementById('weekType').textContent = info.parityText;
     document.getElementById('weekRange').textContent =
-        formatDate(weekInfo.start) + ' — ' + formatDate(weekInfo.end) + ' · ' + weekInfo.weekNumber + '-я неделя';
+        fmtDate(info.start) + ' — ' + fmtDate(info.end) + ' · ' + info.weekNumber + '-я неделя';
 }
 
-function updateDaysStrip(weekInfo) {
+function updateDaysStrip(info) {
     const strip = document.getElementById('daysStrip');
-    const start = weekInfo.start;
-    const isCurrentWeek = isDateInCurrentWeek(weekInfo.start, weekInfo.end);
-
+    const start = info.start;
+    const currentWeek = isThisWeek(info.start, info.end);
     strip.innerHTML = '';
     for (let i = 0; i < 7; i++) {
-        const date = new Date(start);
-        date.setDate(start.getDate() + i);
-
-        const dayDiv = document.createElement('div');
-        dayDiv.className = 'day';
-        if (i === currentDayIndex) dayDiv.classList.add('active');
-        if (isCurrentWeek && isToday(date)) dayDiv.classList.add('today');
-
-        dayDiv.dataset.day = i;
-        dayDiv.innerHTML =
-            '<span class="day-name">' + dayShortNames[i] + '</span>' +
-            '<span class="day-num">' + date.getDate() + '</span>';
-        dayDiv.addEventListener('click', () => selectDay(i));
-        strip.appendChild(dayDiv);
+        const d = new Date(start);
+        d.setDate(start.getDate() + i);
+        const el = document.createElement('div');
+        el.className = 'day';
+        if (i === currentDayIndex) el.classList.add('active');
+        if (currentWeek && isToday(d)) el.classList.add('today');
+        el.innerHTML = '<span class="day-name">' + dayShortNames[i] + '</span>' +
+                       '<span class="day-num">' + d.getDate() + '</span>';
+        el.addEventListener('click', () => selectDay(i));
+        strip.appendChild(el);
     }
 }
 
-function selectDay(index) {
-    if (index === currentDayIndex) return;
-    currentDayIndex = index;
-    document.querySelectorAll('.day').forEach((el, i) => {
-        el.classList.toggle('active', i === index);
+function selectDay(i) {
+    if (i === currentDayIndex) return;
+    currentDayIndex = i;
+    document.querySelectorAll('.day').forEach((el, idx) => {
+        el.classList.toggle('active', idx === i);
     });
     renderSchedule();
 }
 
-function goToToday() {
-    currentWeekOffset = 0;
-    currentDayIndex = getBaseDayIndex();
+function goToday() {
+    currentWeekNum = getRealWeekNum();
+    currentDayIndex = getRealDayIndex();
     initApp();
 }
 
-function parseWeeks(lesson) {
-    const allWeeks = [];
+function prevWeek() {
+    if (currentWeekNum > 1) {
+        currentWeekNum--;
+        initApp();
+    }
+}
 
+function nextWeek() {
+    if (currentWeekNum < 16) {
+        currentWeekNum++;
+        initApp();
+    }
+}
+
+// --- Парсинг недель ---
+function parseWeeks(lesson) {
+    const all = [];
     if (!lesson.weeks) {
         for (let w = 1; w <= 16; w++) {
             if (lesson.week === 'all' ||
                 (lesson.week === 'odd' && w % 2 === 1) ||
-                (lesson.week === 'even' && w % 2 === 0)) {
-                allWeeks.push(w);
-            }
+                (lesson.week === 'even' && w % 2 === 0)) all.push(w);
         }
-        return { startWeek: allWeeks[0] || 1, endWeek: allWeeks[allWeeks.length - 1] || 16, allWeeks };
+        return { start: all[0] || 1, end: all[all.length - 1] || 16, all };
     }
-
-    const ranges = lesson.weeks.split(',').map(function(r) { return r.trim(); });
-    for (let j = 0; j < ranges.length; j++) {
-        const range = ranges[j];
-        if (range.indexOf('-') !== -1) {
-            const parts = range.split('-').map(Number);
-            for (let w = parts[0]; w <= parts[1]; w++) {
+    const parts = lesson.weeks.split(',').map(s => s.trim());
+    for (const p of parts) {
+        if (p.indexOf('-') !== -1) {
+            const [a, b] = p.split('-').map(Number);
+            for (let w = a; w <= b; w++) {
                 if (lesson.week === 'all' ||
                     (lesson.week === 'odd' && w % 2 === 1) ||
-                    (lesson.week === 'even' && w % 2 === 0)) {
-                    allWeeks.push(w);
-                }
+                    (lesson.week === 'even' && w % 2 === 0)) all.push(w);
             }
         } else {
-            const w = Number(range);
+            const w = Number(p);
             if (lesson.week === 'all' ||
                 (lesson.week === 'odd' && w % 2 === 1) ||
-                (lesson.week === 'even' && w % 2 === 0)) {
-                allWeeks.push(w);
-            }
+                (lesson.week === 'even' && w % 2 === 0)) all.push(w);
         }
     }
-
-    allWeeks.sort(function(a, b) { return a - b; });
-    return {
-        startWeek: allWeeks[0] || 1,
-        endWeek: allWeeks[allWeeks.length - 1] || 16,
-        allWeeks: allWeeks
-    };
+    all.sort((a, b) => a - b);
+    return { start: all[0] || 1, end: all[all.length - 1] || 16, all };
 }
 
-function getLessonStatus(lesson, currentWeekNum) {
-    const parsed = parseWeeks(lesson);
-    const allWeeks = parsed.allWeeks;
-
-    if (allWeeks.indexOf(currentWeekNum) !== -1) {
-        return { status: 'active', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
-    }
-
-    if (currentWeekNum < parsed.startWeek) {
-        return { status: 'future', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
-    }
-
-    if (currentWeekNum > parsed.endWeek) {
-        return { status: 'past', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
-    }
-
-    const futureWeeks = allWeeks.filter(function(w) { return w > currentWeekNum; });
-    if (futureWeeks.length > 0) {
-        return { status: 'future', startWeek: futureWeeks[0], endWeek: parsed.endWeek };
-    }
-
-    return { status: 'past', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
+function getLessonStatus(lesson, weekNum) {
+    const p = parseWeeks(lesson);
+    if (p.all.indexOf(weekNum) !== -1) return { status: 'active', start: p.start, end: p.end };
+    if (weekNum < p.start) return { status: 'future', start: p.start, end: p.end };
+    if (weekNum > p.end) return { status: 'past', start: p.start, end: p.end };
+    const fw = p.all.filter(w => w > weekNum);
+    if (fw.length) return { status: 'future', start: fw[0], end: p.end };
+    return { status: 'past', start: p.start, end: p.end };
 }
 
-function getDisplayLessons(dayLessons, currentWeekNum) {
+function getDisplayLessons(dayLessons, weekNum) {
     const byTime = {};
-
-    for (let i = 0; i < dayLessons.length; i++) {
-        const lesson = dayLessons[i];
-        const statusInfo = getLessonStatus(lesson, currentWeekNum);
-        if (statusInfo.status === 'past') continue;
-
-        const time = lesson.time;
-        if (!byTime[time]) byTime[time] = [];
-        byTime[time].push({
-            lesson: lesson,
-            status: statusInfo.status,
-            startWeek: statusInfo.startWeek,
-            endWeek: statusInfo.endWeek
-        });
+    for (const lesson of dayLessons) {
+        const st = getLessonStatus(lesson, weekNum);
+        if (st.status === 'past') continue;
+        const t = lesson.time;
+        if (!byTime[t]) byTime[t] = [];
+        byTime[t].push({ lesson, status: st.status, start: st.start, end: st.end });
     }
-
     const result = [];
     const times = Object.keys(byTime);
-    for (let i = 0; i < times.length; i++) {
-        const time = times[i];
-        const items = byTime[time];
-        items.sort(function(a, b) {
+    for (const t of times) {
+        const items = byTime[t];
+        items.sort((a, b) => {
             if (a.status === 'active' && b.status !== 'active') return -1;
             if (a.status !== 'active' && b.status === 'active') return 1;
-            return a.startWeek - b.startWeek;
+            return a.start - b.start;
         });
         result.push(items[0]);
     }
-
-    result.sort(function(a, b) {
-        return times.indexOf(a.lesson.time) - times.indexOf(b.lesson.time);
-    });
-
+    result.sort((a, b) => times.indexOf(a.lesson.time) - times.indexOf(b.lesson.time));
     return result;
 }
 
-function getLessonTypeClass(subject) {
-    const lower = subject.toLowerCase();
-    if (lower.indexOf('(л)') !== -1) return 'lecture';
-    if (lower.indexOf('(пз)') !== -1) return 'practice';
-    if (lower.indexOf('(лз)') !== -1) return 'lab';
-    if (lower.indexOf('физическая культура') !== -1) return 'sport';
-    if (lower.indexOf('проектное обучение') !== -1) return 'project';
+function getTypeClass(subject) {
+    const s = subject.toLowerCase();
+    if (s.indexOf('(л)') !== -1) return 'lecture';
+    if (s.indexOf('(пз)') !== -1) return 'practice';
+    if (s.indexOf('(лз)') !== -1) return 'lab';
+    if (s.indexOf('физическая культура') !== -1) return 'sport';
+    if (s.indexOf('проектное обучение') !== -1) return 'project';
     return 'lecture';
 }
 
 function renderSchedule() {
     const container = document.getElementById('scheduleContent');
     const group = scheduleData.groups[currentGroup];
+    if (!group) { container.innerHTML = emptyHTML('Группа не найдена'); return; }
 
-    if (!group) {
-        container.innerHTML = emptyStateHTML('Группа не найдена');
-        return;
-    }
+    const info = getWeekInfo(currentWeekNum);
+    const start = info.start;
+    const selDate = new Date(start);
+    selDate.setDate(start.getDate() + currentDayIndex);
 
-    const weekInfo = getWeekInfo(currentWeekOffset);
-    const start = weekInfo.start;
-    const selectedDate = new Date(start);
-    selectedDate.setDate(start.getDate() + currentDayIndex);
-
-    if (isDateBeforeSemester(selectedDate)) {
-        container.innerHTML = vacationStateHTML();
+    if (isBeforeSemester(selDate)) {
+        container.innerHTML = vacationHTML();
         return;
     }
 
@@ -307,126 +272,78 @@ function renderSchedule() {
     const lessons = group.schedule[dayKey] || [];
 
     if (lessons.length === 0) {
-        container.innerHTML = sundayEmptyHTML();
+        container.innerHTML = sundayHTML();
         return;
     }
 
-    const displayItems = getDisplayLessons(lessons, weekInfo.weekNumber);
-
-    if (displayItems.length === 0) {
-        container.innerHTML = emptyStateHTML(
-            'Нет пар в этот день',
-            'На этой неделе занятий нет, но они будут позже в семестре.'
-        );
+    const items = getDisplayLessons(lessons, currentWeekNum);
+    if (items.length === 0) {
+        container.innerHTML = emptyHTML('Нет пар в этот день', 'На этой неделе занятий нет, но они будут позже.');
         return;
     }
 
-    const renderKey = currentDayIndex + '-' + currentWeekOffset;
-    const shouldAnimate = renderKey !== lastRenderedKey;
-    lastRenderedKey = renderKey;
+    const key = currentWeekNum + '-' + currentDayIndex;
+    const anim = key !== lastRenderKey;
+    lastRenderKey = key;
 
-    container.innerHTML = displayItems.map(function(item, index) {
-        const lesson = item.lesson;
-        const isFuture = item.status === 'future';
-        const typeClass = getLessonTypeClass(lesson.subject);
-        const futureClass = isFuture ? 'future' : '';
-        const animateClass = shouldAnimate ? 'animate' : '';
-        const isFullDay = lesson.full_day;
+    container.innerHTML = items.map((it, i) => {
+        const l = it.lesson;
+        const isFut = it.status === 'future';
+        const tc = getTypeClass(l.subject);
+        const fc = isFut ? 'future' : '';
+        const ac = anim ? 'animate' : '';
+        const fd = l.full_day;
 
         let badge = '';
-        if (isFuture) {
-            badge = '<span class="future-badge">С ' + item.startWeek + ' недели</span>';
-        } else if (item.endWeek < 16) {
-            badge = '<span class="end-badge">до ' + item.endWeek + ' недели</span>';
-        }
+        if (isFut) badge = '<span class="future-badge">С ' + it.start + ' недели</span>';
+        else if (it.end < 16) badge = '<span class="end-badge">до ' + it.end + ' недели</span>';
 
-        if (isFullDay) {
-            return '<div class="lesson-card ' + typeClass + ' full-day ' + futureClass + ' ' + animateClass + '" style="animation-delay: ' + (index * 0.05) + 's">' +
-                badge +
-                '<div class="lesson-time">' + lesson.time + '</div>' +
-                '<div class="lesson-title">' + lesson.subject + '</div>' +
-                '<div class="lesson-meta">' +
-                '<div class="lesson-teacher">' + (lesson.teacher !== '—' ? lesson.teacher : 'Весь день занят') + '</div>' +
-                '</div></div>';
+        if (fd) {
+            return '<div class="lesson-card ' + tc + ' full-day ' + fc + ' ' + ac + '" style="animation-delay:' + (i * 0.05) + 's">' +
+                badge + '<div class="lesson-time">' + l.time + '</div>' +
+                '<div class="lesson-title">' + l.subject + '</div>' +
+                '<div class="lesson-meta"><div class="lesson-teacher">' + (l.teacher !== '—' ? l.teacher : 'Весь день занят') + '</div></div></div>';
         }
-
-        return '<div class="lesson-card ' + typeClass + ' ' + futureClass + ' ' + animateClass + '" style="animation-delay: ' + (index * 0.05) + 's">' +
-            badge +
-            '<div class="lesson-time">' + lesson.time + '</div>' +
-            '<div class="lesson-title">' + lesson.subject + '</div>' +
+        return '<div class="lesson-card ' + tc + ' ' + fc + ' ' + ac + '" style="animation-delay:' + (i * 0.05) + 's">' +
+            badge + '<div class="lesson-time">' + l.time + '</div>' +
+            '<div class="lesson-title">' + l.subject + '</div>' +
             '<div class="lesson-meta">' +
-            (lesson.teacher !== '—' ? '<div class="lesson-teacher">' + lesson.teacher + '</div>' : '') +
-            (lesson.room !== '—' ? '<div class="lesson-room">' + lesson.room + '</div>' : '') +
+            (l.teacher !== '—' ? '<div class="lesson-teacher">' + l.teacher + '</div>' : '') +
+            (l.room !== '—' ? '<div class="lesson-room">' + l.room + '</div>' : '') +
             '</div></div>';
     }).join('');
 }
 
-function emptyStateHTML(title, text) {
-    return '<div class="empty-state">' +
-        '<div class="empty-icon">⏳</div>' +
-        '<div class="empty-title">' + title + '</div>' +
-        (text ? '<div class="empty-text">' + text + '</div>' : '') +
-        '</div>';
+function emptyHTML(title, text) {
+    return '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">' + title + '</div>' +
+        (text ? '<div class="empty-text">' + text + '</div>' : '') + '</div>';
+}
+function sundayHTML() {
+    return '<div class="empty-state"><div class="empty-icon">⏳</div><div class="empty-title">Нет пар в этот день</div></div>';
+}
+function vacationHTML() {
+    return '<div class="vacation-state"><div class="vacation-icon">🏖️</div><div class="vacation-title">Каникулы</div></div>';
 }
 
-function sundayEmptyHTML() {
-    return '<div class="empty-state">' +
-        '<div class="empty-icon">⏳</div>' +
-        '<div class="empty-title">Нет пар в этот день</div>' +
-        '</div>';
-}
-
-function vacationStateHTML() {
-    return '<div class="vacation-state">' +
-        '<div class="vacation-icon">🏖️</div>' +
-        '<div class="vacation-title">Каникулы</div>' +
-        '</div>';
-}
-
-let listenersSetup = false;
-
-function setupEventListeners() {
-    if (listenersSetup) return;
-    listenersSetup = true;
-
-    document.getElementById('prevWeek').addEventListener('click', function() {
-        currentWeekOffset--;
-        initApp();
-    });
-
-    document.getElementById('nextWeek').addEventListener('click', function() {
-        currentWeekOffset++;
-        initApp();
-    });
-
-    document.getElementById('todayBtn').addEventListener('click', function() {
-        goToToday();
-    });
-
-    document.querySelectorAll('.nav-item').forEach(function(item) {
-        item.addEventListener('click', function() {
-            document.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('active'); });
+let listenersDone = false;
+function setupListenersOnce() {
+    if (listenersDone) return;
+    listenersDone = true;
+    document.getElementById('prevWeek').addEventListener('click', prevWeek);
+    document.getElementById('nextWeek').addEventListener('click', nextWeek);
+    document.getElementById('todayBtn').addEventListener('click', goToday);
+    document.querySelectorAll('.nav-item').forEach(item => {
+        item.addEventListener('click', () => {
+            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
             item.classList.add('active');
-            const page = item.dataset.page;
-            if (page === 'schedule') {
-                renderSchedule();
-            } else {
-                showPagePlaceholder(page);
-            }
+            if (item.dataset.page === 'schedule') renderSchedule();
+            else document.getElementById('scheduleContent').innerHTML = emptyHTML('Спортивные занятия', 'Раздел в разработке');
         });
     });
 }
 
-function showPagePlaceholder(page) {
-    const container = document.getElementById('scheduleContent');
-    const titles = {
-        sport: 'Спортивные занятия'
-    };
-    container.innerHTML = emptyStateHTML(titles[page] || 'Раздел в разработке', 'Этот раздел скоро появится!');
-}
-
-function showError(message) {
-    document.getElementById('scheduleContent').innerHTML = emptyStateHTML('Ошибка', message);
+function showError(msg) {
+    document.getElementById('scheduleContent').innerHTML = emptyHTML('Ошибка', msg);
 }
 
 loadSchedule();
