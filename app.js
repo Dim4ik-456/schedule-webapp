@@ -15,8 +15,6 @@ let currentGroup = 'БИ 2-3';
 let currentWeekOffset = 0;
 let currentDayIndex = 0;
 let scheduleData = null;
-let currentWeekNumber = 1;
-let currentWeekParity = 'odd';
 let semesterStart = null;
 let lastRenderedKey = null;
 
@@ -39,29 +37,37 @@ async function loadSchedule() {
     }
 }
 
-function getWeekInfo(offset) {
-    const startDate = new Date(scheduleData.meta.start_date);
+function getCurrentWeekNumber() {
     const now = new Date();
-    const diffTime = now - startDate;
-    const diffDays = Math.floor(diffTime / (1000 * 60 * 60 * 24));
-    const currentStudyWeek = Math.max(1, Math.min(16, Math.floor(diffDays / 7) + 1 + offset));
+    now.setHours(0, 0, 0, 0);
+    if (now < semesterStart) return 1;
+    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
+    return Math.floor(diffDays / 7) + 1;
+}
 
-    const weekStart = new Date(startDate);
-    weekStart.setDate(startDate.getDate() + (currentStudyWeek - 1) * 7 + offset * 7);
+function getWeekInfo(offset) {
+    const currentWeek = getCurrentWeekNumber();
+    const targetWeek = currentWeek + offset;
+
+    const weekStart = new Date(semesterStart);
+    weekStart.setDate(semesterStart.getDate() + (targetWeek - 1) * 7);
 
     const weekEnd = new Date(weekStart);
     weekEnd.setDate(weekStart.getDate() + 6);
 
-    const isOdd = scheduleData.meta.odd_weeks.includes(currentStudyWeek);
+    const clampedWeek = Math.max(1, Math.min(16, targetWeek));
+    const isOdd = scheduleData.meta.odd_weeks.includes(clampedWeek);
 
     return {
-        weekNumber: currentStudyWeek,
+        weekNumber: targetWeek,
+        clampedWeek: clampedWeek,
         isOdd: isOdd,
         parity: isOdd ? 'odd' : 'even',
         parityText: isOdd ? 'Нечётная' : 'Чётная',
         start: weekStart,
         end: weekEnd,
-        monthText: getMonthRangeText(weekStart, weekEnd)
+        monthText: getMonthRangeText(weekStart, weekEnd),
+        isBeforeSemester: weekEnd < semesterStart
     };
 }
 
@@ -81,10 +87,26 @@ function isDateBeforeSemester(date) {
     return d < semesterStart;
 }
 
+function isToday(date) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d.getTime() === now.getTime();
+}
+
+function isDateInCurrentWeek(weekStart, weekEnd) {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    const ws = new Date(weekStart);
+    ws.setHours(0, 0, 0, 0);
+    const we = new Date(weekEnd);
+    we.setHours(0, 0, 0, 0);
+    return now >= ws && now <= we;
+}
+
 function initApp() {
     const weekInfo = getWeekInfo(currentWeekOffset);
-    currentWeekNumber = weekInfo.weekNumber;
-    currentWeekParity = weekInfo.parity;
     updateWeekDisplay(weekInfo);
     updateDaysStrip(weekInfo);
     renderSchedule();
@@ -95,18 +117,24 @@ function updateWeekDisplay(weekInfo) {
     document.getElementById('weekMonth').textContent = weekInfo.monthText;
     document.getElementById('weekType').textContent = weekInfo.parityText;
     document.getElementById('weekRange').textContent =
-        formatDate(weekInfo.start) + ' — ' + formatDate(weekInfo.end) + ' · ' + weekInfo.weekNumber + '-я неделя';
+        formatDate(weekInfo.start) + ' — ' + formatDate(weekInfo.end) + ' · ' + weekInfo.clampedWeek + '-я неделя';
 }
 
 function updateDaysStrip(weekInfo) {
     const strip = document.getElementById('daysStrip');
     const start = weekInfo.start;
+    const isCurrentWeek = isDateInCurrentWeek(weekInfo.start, weekInfo.end);
+
     strip.innerHTML = '';
     for (let i = 0; i < 7; i++) {
         const date = new Date(start);
         date.setDate(start.getDate() + i);
+
         const dayDiv = document.createElement('div');
-        dayDiv.className = 'day ' + (i === currentDayIndex ? 'active' : '');
+        dayDiv.className = 'day';
+        if (i === currentDayIndex) dayDiv.classList.add('active');
+        if (isCurrentWeek && isToday(date)) dayDiv.classList.add('today');
+
         dayDiv.dataset.day = i;
         dayDiv.innerHTML =
             '<span class="day-name">' + dayShortNames[i] + '</span>' +
@@ -125,7 +153,25 @@ function selectDay(index) {
     renderSchedule();
 }
 
-// Parse weeks string into { startWeek, endWeek, allWeeks[] }
+function goToToday() {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+
+    if (now < semesterStart) {
+        // Before semester: go to week 1, monday
+        currentWeekOffset = 0;
+        currentDayIndex = 0;
+    } else {
+        const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
+        const currentWeek = Math.floor(diffDays / 7) + 1;
+        const dayOfWeek = diffDays % 7;
+        currentWeekOffset = currentWeek - getCurrentWeekNumber();
+        currentDayIndex = Math.max(0, Math.min(6, dayOfWeek));
+    }
+
+    initApp();
+}
+
 function parseWeeks(lesson) {
     const allWeeks = [];
     let startWeek = 16;
@@ -142,9 +188,10 @@ function parseWeeks(lesson) {
         return { startWeek: allWeeks[0] || 1, endWeek: allWeeks[allWeeks.length - 1] || 16, allWeeks };
     }
 
-    const ranges = lesson.weeks.split(',').map(r => r.trim());
-    for (const range of ranges) {
-        if (range.includes('-')) {
+    const ranges = lesson.weeks.split(',').map(function(r) { return r.trim(); });
+    for (let j = 0; j < ranges.length; j++) {
+        const range = ranges[j];
+        if (range.indexOf('-') !== -1) {
             const parts = range.split('-').map(Number);
             for (let w = parts[0]; w <= parts[1]; w++) {
                 if (lesson.week === 'all' ||
@@ -163,81 +210,83 @@ function parseWeeks(lesson) {
         }
     }
 
-    allWeeks.sort((a, b) => a - b);
+    allWeeks.sort(function(a, b) { return a - b; });
     return {
         startWeek: allWeeks[0] || 1,
         endWeek: allWeeks[allWeeks.length - 1] || 16,
-        allWeeks
+        allWeeks: allWeeks
     };
 }
 
-// Get lesson status for current week
 function getLessonStatus(lesson, currentWeekNum) {
-    const { startWeek, endWeek, allWeeks } = parseWeeks(lesson);
+    const parsed = parseWeeks(lesson);
+    const allWeeks = parsed.allWeeks;
 
-    if (allWeeks.includes(currentWeekNum)) {
-        return { status: 'active', startWeek, endWeek };
+    if (allWeeks.indexOf(currentWeekNum) !== -1) {
+        return { status: 'active', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
     }
 
-    if (currentWeekNum < startWeek) {
-        return { status: 'future', startWeek, endWeek };
+    if (currentWeekNum < parsed.startWeek) {
+        return { status: 'future', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
     }
 
-    if (currentWeekNum > endWeek) {
-        return { status: 'past', startWeek, endWeek };
+    if (currentWeekNum > parsed.endWeek) {
+        return { status: 'past', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
     }
 
-    // Between start and end but not in list (gap week)
-    const futureWeeks = allWeeks.filter(w => w > currentWeekNum);
+    const futureWeeks = allWeeks.filter(function(w) { return w > currentWeekNum; });
     if (futureWeeks.length > 0) {
-        return { status: 'future', startWeek: futureWeeks[0], endWeek };
+        return { status: 'future', startWeek: futureWeeks[0], endWeek: parsed.endWeek };
     }
 
-    return { status: 'past', startWeek, endWeek };
+    return { status: 'past', startWeek: parsed.startWeek, endWeek: parsed.endWeek };
 }
 
-// Group lessons by time slot and pick the best one to display
 function getDisplayLessons(dayLessons, currentWeekNum) {
     const byTime = {};
 
-    for (const lesson of dayLessons) {
+    for (let i = 0; i < dayLessons.length; i++) {
+        const lesson = dayLessons[i];
         const statusInfo = getLessonStatus(lesson, currentWeekNum);
         if (statusInfo.status === 'past') continue;
 
         const time = lesson.time;
         if (!byTime[time]) byTime[time] = [];
-        byTime[time].push({ lesson, status: statusInfo.status, startWeek: statusInfo.startWeek, endWeek: statusInfo.endWeek });
+        byTime[time].push({
+            lesson: lesson,
+            status: statusInfo.status,
+            startWeek: statusInfo.startWeek,
+            endWeek: statusInfo.endWeek
+        });
     }
 
     const result = [];
-    for (const time in byTime) {
+    const times = Object.keys(byTime);
+    for (let i = 0; i < times.length; i++) {
+        const time = times[i];
         const items = byTime[time];
-        // Sort: active first, then by startWeek ascending
-        items.sort((a, b) => {
+        items.sort(function(a, b) {
             if (a.status === 'active' && b.status !== 'active') return -1;
             if (a.status !== 'active' && b.status === 'active') return 1;
             return a.startWeek - b.startWeek;
         });
-
-        // Take the first one (active if exists, otherwise earliest future)
-        const best = items[0];
-        result.push(best);
+        result.push(items[0]);
     }
 
-    // Sort by time
-    const timeOrder = Object.keys(byTime);
-    result.sort((a, b) => timeOrder.indexOf(a.lesson.time) - timeOrder.indexOf(b.lesson.time));
+    result.sort(function(a, b) {
+        return times.indexOf(a.lesson.time) - times.indexOf(b.lesson.time);
+    });
 
     return result;
 }
 
 function getLessonTypeClass(subject) {
     const lower = subject.toLowerCase();
-    if (lower.includes('(л)')) return 'lecture';
-    if (lower.includes('(пз)')) return 'practice';
-    if (lower.includes('(лз)')) return 'lab';
-    if (lower.includes('физическая культура')) return 'sport';
-    if (lower.includes('проектное обучение')) return 'project';
+    if (lower.indexOf('(л)') !== -1) return 'lecture';
+    if (lower.indexOf('(пз)') !== -1) return 'practice';
+    if (lower.indexOf('(лз)') !== -1) return 'lab';
+    if (lower.indexOf('физическая культура') !== -1) return 'sport';
+    if (lower.indexOf('проектное обучение') !== -1) return 'project';
     return 'lecture';
 }
 
@@ -256,8 +305,7 @@ function renderSchedule() {
     selectedDate.setDate(start.getDate() + currentDayIndex);
 
     if (isDateBeforeSemester(selectedDate)) {
-        const daysUntil = Math.ceil((semesterStart - selectedDate) / (1000 * 60 * 60 * 24));
-        container.innerHTML = vacationStateHTML(daysUntil);
+        container.innerHTML = vacationStateHTML();
         return;
     }
 
@@ -265,14 +313,11 @@ function renderSchedule() {
     const lessons = group.schedule[dayKey] || [];
 
     if (lessons.length === 0) {
-        container.innerHTML = emptyStateHTML(
-            'Нет пар в этот день',
-            'В этот день занятий нет. Отдохни или займись самоподготовкой!'
-        );
+        container.innerHTML = sundayEmptyHTML();
         return;
     }
 
-    const displayItems = getDisplayLessons(lessons, currentWeekNumber);
+    const displayItems = getDisplayLessons(lessons, weekInfo.clampedWeek);
 
     if (displayItems.length === 0) {
         container.innerHTML = emptyStateHTML(
@@ -286,7 +331,7 @@ function renderSchedule() {
     const shouldAnimate = renderKey !== lastRenderedKey;
     lastRenderedKey = renderKey;
 
-    container.innerHTML = displayItems.map((item, index) => {
+    container.innerHTML = displayItems.map(function(item, index) {
         const lesson = item.lesson;
         const isFuture = item.status === 'future';
         const typeClass = getLessonTypeClass(lesson.subject);
@@ -294,7 +339,6 @@ function renderSchedule() {
         const animateClass = shouldAnimate ? 'animate' : '';
         const isFullDay = lesson.full_day;
 
-        // Badge logic
         let badge = '';
         if (isFuture) {
             badge = '<span class="future-badge">С ' + item.startWeek + ' недели</span>';
@@ -331,40 +375,38 @@ function emptyStateHTML(title, text) {
         '</div>';
 }
 
-function vacationStateHTML(daysUntil) {
-    const dayWord = daysUntil === 1 ? 'день' : (daysUntil < 5 ? 'дня' : 'дней');
+function sundayEmptyHTML() {
+    return '<div class="empty-state">' +
+        '<div class="empty-icon">⏳</div>' +
+        '<div class="empty-title">Нет пар в этот день</div>' +
+        '</div>';
+}
+
+function vacationStateHTML() {
     return '<div class="vacation-state">' +
         '<div class="vacation-icon">🏖️</div>' +
-        '<div class="vacation-title">Каникулы!</div>' +
-        '<div class="vacation-text">Семестр ещё не начался.<br>Отдыхай и набирайся сил!</div>' +
-        '<div class="vacation-countdown">До начала семестра: ' + daysUntil + ' ' + dayWord + '</div>' +
+        '<div class="vacation-title">Каникулы</div>' +
         '</div>';
 }
 
 function setupEventListeners() {
-    document.getElementById('prevWeek').addEventListener('click', () => {
+    document.getElementById('prevWeek').addEventListener('click', function() {
         currentWeekOffset--;
-        const weekInfo = getWeekInfo(currentWeekOffset);
-        currentWeekNumber = weekInfo.weekNumber;
-        currentWeekParity = weekInfo.parity;
-        updateWeekDisplay(weekInfo);
-        updateDaysStrip(weekInfo);
-        renderSchedule();
+        initApp();
     });
 
-    document.getElementById('nextWeek').addEventListener('click', () => {
+    document.getElementById('nextWeek').addEventListener('click', function() {
         currentWeekOffset++;
-        const weekInfo = getWeekInfo(currentWeekOffset);
-        currentWeekNumber = weekInfo.weekNumber;
-        currentWeekParity = weekInfo.parity;
-        updateWeekDisplay(weekInfo);
-        updateDaysStrip(weekInfo);
-        renderSchedule();
+        initApp();
     });
 
-    document.querySelectorAll('.nav-item').forEach(item => {
-        item.addEventListener('click', () => {
-            document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
+    document.getElementById('todayBtn').addEventListener('click', function() {
+        goToToday();
+    });
+
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.addEventListener('click', function() {
+            document.querySelectorAll('.nav-item').forEach(function(i) { i.classList.remove('active'); });
             item.classList.add('active');
             const page = item.dataset.page;
             if (page === 'schedule') {
