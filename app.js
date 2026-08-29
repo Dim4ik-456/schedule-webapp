@@ -93,6 +93,12 @@ function formatDate(date) {
     return date.getDate() + ' ' + monthNames[date.getMonth()];
 }
 
+function isDateBeforeSemester(date) {
+    const d = new Date(date);
+    d.setHours(0, 0, 0, 0);
+    return d < semesterStart;
+}
+
 function isToday(date) {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
@@ -300,9 +306,11 @@ function renderSchedule() {
     }
 
     const weekInfo = getWeekInfo(currentWeekOffset);
+    const start = weekInfo.start;
+    const selectedDate = new Date(start);
+    selectedDate.setDate(start.getDate() + currentDayIndex);
 
-    // Если вся неделя до начала семестра — каникулы
-    if (weekInfo.isBeforeSemester) {
+    if (isDateBeforeSemester(selectedDate)) {
         container.innerHTML = vacationStateHTML();
         return;
     }
