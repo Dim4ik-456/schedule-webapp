@@ -155,6 +155,7 @@ function selectDay(index) {
     document.querySelectorAll('.day').forEach((el, i) => {
         el.classList.toggle('active', i === index);
     });
+    setActiveNavTab('schedule');
     renderSchedule();
 }
 
@@ -167,6 +168,7 @@ function goToToday() {
 
     currentWeekOffset = 0;
     currentDayIndex = Math.max(0, Math.min(6, dayOfWeek));
+    setActiveNavTab('schedule');
     initApp();
 }
 
@@ -385,17 +387,25 @@ function vacationStateHTML() {
         '</div>';
 }
 
+function setActiveNavTab(page) {
+    document.querySelectorAll('.nav-item').forEach(function(item) {
+        item.classList.toggle('active', item.dataset.page === page);
+    });
+}
+
 function setupEventListeners() {
     if (listenersInitialized) return;
     listenersInitialized = true;
 
     document.getElementById('prevWeek').addEventListener('click', function() {
         currentWeekOffset--;
+        setActiveNavTab('schedule');
         initApp();
     });
 
     document.getElementById('nextWeek').addEventListener('click', function() {
         currentWeekOffset++;
+        setActiveNavTab('schedule');
         initApp();
     });
 
