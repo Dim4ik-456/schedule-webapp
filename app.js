@@ -17,6 +17,7 @@ let currentDayIndex = 0;
 let scheduleData = null;
 let semesterStart = null;
 let lastRenderedKey = null;
+let listenersInitialized = false;
 
 const dayNames = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
 const dayShortNames = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
@@ -31,6 +32,7 @@ async function loadSchedule() {
         semesterStart = new Date(scheduleData.meta.start_date);
         semesterStart.setHours(0, 0, 0, 0);
         initApp();
+        setupEventListeners();
     } catch (e) {
         console.error('Failed to load schedule:', e);
         showError('Не удалось загрузить расписание');
@@ -40,7 +42,6 @@ async function loadSchedule() {
 function getCurrentWeekNumber() {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
-    if (now < semesterStart) return 1;
     const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
     return Math.floor(diffDays / 7) + 1;
 }
@@ -110,14 +111,18 @@ function initApp() {
     updateWeekDisplay(weekInfo);
     updateDaysStrip(weekInfo);
     renderSchedule();
-    setupEventListeners();
 }
 
 function updateWeekDisplay(weekInfo) {
     document.getElementById('weekMonth').textContent = weekInfo.monthText;
     document.getElementById('weekType').textContent = weekInfo.parityText;
+
+    const weekLabel = (weekInfo.weekNumber >= 1 && weekInfo.weekNumber <= 16)
+        ? weekInfo.clampedWeek + '-я неделя'
+        : 'неделя ' + weekInfo.weekNumber;
+
     document.getElementById('weekRange').textContent =
-        formatDate(weekInfo.start) + ' — ' + formatDate(weekInfo.end) + ' · ' + weekInfo.clampedWeek + '-я неделя';
+        formatDate(weekInfo.start) + ' — ' + formatDate(weekInfo.end) + ' · ' + weekLabel;
 }
 
 function updateDaysStrip(weekInfo) {
@@ -157,25 +162,16 @@ function goToToday() {
     const now = new Date();
     now.setHours(0, 0, 0, 0);
 
-    if (now < semesterStart) {
-        // Before semester: go to week 1, monday
-        currentWeekOffset = 0;
-        currentDayIndex = 0;
-    } else {
-        const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
-        const currentWeek = Math.floor(diffDays / 7) + 1;
-        const dayOfWeek = diffDays % 7;
-        currentWeekOffset = currentWeek - getCurrentWeekNumber();
-        currentDayIndex = Math.max(0, Math.min(6, dayOfWeek));
-    }
+    const diffDays = Math.floor((now - semesterStart) / (1000 * 60 * 60 * 24));
+    const dayOfWeek = ((diffDays % 7) + 7) % 7;
 
+    currentWeekOffset = 0;
+    currentDayIndex = Math.max(0, Math.min(6, dayOfWeek));
     initApp();
 }
 
 function parseWeeks(lesson) {
     const allWeeks = [];
-    let startWeek = 16;
-    let endWeek = 1;
 
     if (!lesson.weeks) {
         for (let w = 1; w <= 16; w++) {
@@ -390,6 +386,9 @@ function vacationStateHTML() {
 }
 
 function setupEventListeners() {
+    if (listenersInitialized) return;
+    listenersInitialized = true;
+
     document.getElementById('prevWeek').addEventListener('click', function() {
         currentWeekOffset--;
         initApp();
